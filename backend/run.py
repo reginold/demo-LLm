@@ -48,8 +48,7 @@ def llm_jp_172b():
 def gpt4o():
     data = request.get_json()
     prompt = data.get("prompt", "")
-    openai.api_key = os.environ.get("OPENAI_API_KEY", "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")
-    
+
     try:
         completion = openai.chat.completions.create(
             model="gpt-4o",
@@ -70,7 +69,6 @@ def llama3_405b():
     prompt = data.get("prompt", "")
     
     client = openai.OpenAI(
-            api_key=os.environ.get("SAMBANOVA_API_KEY", "4da92e04-f2e4-4a25-8f40-b699512078b3"),
             base_url="https://api.sambanova.ai/v1",
         )
 
