@@ -25,7 +25,7 @@ CORS(app,
 # Initialize OpenAI client
 client_sn = openai.OpenAI(
         api_key=os.environ["SAMBANOVA_API_KEY"],
-        base_url="https://api.sambanova.ai/v1/chat/completions",
+        base_url="https://api.sambanova.ai/v1",
     )
 # ------------------------------------------------------------------------------
 # Root endpoint to confirm the backend is running
@@ -34,8 +34,116 @@ client_sn = openai.OpenAI(
 def home():
     return (
         "Welcome to the Flask backend!<br>"
+        "Available endpoints:<br>"
+        "/api/llm_jp_172b (POST)<br>"
+        "/api/gpt4o (POST)<br>"
+        "/api/llama3_405b (POST)"
     )
 
+# ------------------------------------------------------------------------------
+# 1. LLM-JP-172B model (Placeholder)
+# ------------------------------------------------------------------------------
+@app.route("/api/llm_jp_172b", methods=["POST"])
+def llm_jp_172b():
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    start_time = time.time()  # Store in seconds
+
+    def generate():
+        words = f"[LLM-JP-172B placeholder response for prompt: {prompt[:50]}...]".split()
+        for word in words:
+            current_time = time.time()
+            duration = current_time - start_time
+            
+            data = json.dumps({
+                "model": "llm_jp", 
+                "content": word + " ",
+                "timing": {
+                    "duration": duration * 1000  # Convert to milliseconds for frontend
+                }
+            })
+            yield f"data: {data}\n\n"
+            time.sleep(0.1)
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+# ------------------------------------------------------------------------------
+# 2. GPT-4o model
+# ------------------------------------------------------------------------------
+@app.route("/api/gpt4o", methods=["POST"])
+def gpt4o():
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    openai.api_key = os.environ["OPENAI_API_KEY"]
+    start_time = time.time()
+    
+    def generate():
+        try:
+            completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                stream=True
+            )
+            
+            for chunk in completion:
+                if chunk.choices[0].delta.content:
+                    current_time = time.time()
+                    content = chunk.choices[0].delta.content
+                    duration = (current_time - start_time) * 1000  # Convert to milliseconds
+                    
+                    data = json.dumps({
+                        "model": "gpt4o", 
+                        "content": content,
+                        "timing": {
+                            "duration": duration
+                        }
+                    })
+                    yield f"data: {data}\n\n"
+        except Exception as e:
+            error_data = json.dumps({"error": f"Error calling GPT-4o API: {str(e)}"})
+            yield f"data: {error_data}\n\n"
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+# ------------------------------------------------------------------------------
+# 3. Llama3-405B model
+# ------------------------------------------------------------------------------
+@app.route("/api/llama3_405b", methods=["POST"])
+def llama3_405b():
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    start_time = time.time()
+    
+    def generate():
+        try:
+            completion = client_sn.chat.completions.create(
+                model="Meta-Llama-3.1-405B-Instruct",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant"},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True
+            )
+            
+            for chunk in completion:
+                if chunk.choices[0].delta.content:
+                    current_time = time.time()
+                    content = chunk.choices[0].delta.content
+                    duration = (current_time - start_time) * 1000  # Convert to milliseconds
+                    
+                    data = json.dumps({
+                        "model": "llama3", 
+                        "content": content,
+                        "timing": {
+                            "duration": duration
+                        }
+                    })
+                    yield f"data: {data}\n\n"
+        except Exception as e:
+            error_data = json.dumps({"error": f"Error calling Llama3-405B API: {str(e)}"})
+            yield f"data: {error_data}\n\n"
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 # ------------------------------------------------------------------------------
 # Compare models endpoint
@@ -55,7 +163,7 @@ def compare_models():
             
             # Start all three model calls concurrently
             llama_completion = client_sn.chat.completions.create(
-                model="DeepSeek-R1",
+                model="Meta-Llama-3.1-405B-Instruct",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant"},
                     {"role": "user", "content": prompt},

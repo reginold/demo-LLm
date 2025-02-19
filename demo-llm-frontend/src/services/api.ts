@@ -35,29 +35,60 @@ api.interceptors.request.use(request => {
   return request;
 });
 
+interface StreamResponse {
+  model: string;
+  content: string;
+  timing?: {
+    duration: number;
+  };
+  error?: string;
+}
+
 export const ModelService = {
-  compareModels: async (prompt: string): Promise<ComparisonState> => {
+  compareModels: async (prompt: string, onUpdate: (modelId: string, content: string, timing?: { duration: number }) => void): Promise<void> => {
     try {
       console.log('Comparing models with prompt:', prompt);
-      const response = await api.post<{
-        llama3_response: string;
-        gpt4o_response: string;
-        llm_jp_response: string;
-      }>('/api/compare', { prompt });
-      
-      return {
-        llama3405bResponse: response.data.llama3_response,
-        gpt4oResponse: response.data.gpt4o_response,
-        llmJp172bResponse: response.data.llm_jp_response,
-      };
+      const response = await fetch(`${API_URL}/api/compare`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
+        credentials: 'include'
+      });
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      while (reader) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data: StreamResponse = JSON.parse(line.slice(6));
+              if (data.error) {
+                throw new Error(data.error);
+              }
+              if (data.model && data.content) {
+                onUpdate(data.model, data.content, data.timing);
+              }
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError);
+            }
+          }
+        }
+      }
     } catch (error: any) {
       console.error('Model Comparison Error:', error);
-      const errorMessage = `Error: ${error.message}. Server status: ${error.response?.status || 'unreachable'}`;
-      return {
-        llama3405bResponse: errorMessage,
-        gpt4oResponse: errorMessage,
-        llmJp172bResponse: errorMessage,
-      };
+      const errorMessage = `Error: ${error.message}`;
+      onUpdate('llama3', errorMessage);
+      onUpdate('gpt4o', errorMessage);
+      onUpdate('llm_jp', errorMessage);
     }
   },
 
