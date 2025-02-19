@@ -6,6 +6,8 @@ import openai
 import logging
 import time
 import json
+from queue import Queue, Empty
+from threading import Thread
 
 # Load environment variables
 load_dotenv()
@@ -156,85 +158,117 @@ def compare_models():
     def generate():
         try:
             start_times = {
-                "llama3": time.time(),  # Store in seconds
+                "llama3": time.time(),
                 "gpt4o": time.time(),
                 "llm_jp": time.time()
             }
             
-            # Start all three model calls concurrently
-            llama_completion = client_sn.chat.completions.create(
-                model="Meta-Llama-3.1-405B-Instruct",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant"},
-                    {"role": "user", "content": prompt},
-                ],
-                stream=True
-            )
-            
-            gpt4o_completion = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                stream=True
-            )
-            
-            # Create generators for each model
-            responses = {
-                "llama3": "",
-                "gpt4o": "",
-                "llm_jp": ""
+            # Create queues for each model's responses
+            response_queues = {
+                "llama3": Queue(),
+                "gpt4o": Queue(),
+                "llm_jp": Queue()
             }
             
-            # Simulate LLM-JP streaming
-            words = f"[LLM-JP-172B placeholder response for prompt: {prompt[:50]}...]".split()
-            for word in words:
-                current_time = time.time()
-                responses["llm_jp"] += word + " "
-                duration = current_time - start_times["llm_jp"]
+            def llama3_worker():
+                try:
+                    completion = client_sn.chat.completions.create(
+                        model="Meta-Llama-3.1-405B-Instruct",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant"},
+                            {"role": "user", "content": prompt},
+                        ],
+                        stream=True
+                    )
+                    
+                    for chunk in completion:
+                        if chunk.choices[0].delta.content:
+                            current_time = time.time()
+                            content = chunk.choices[0].delta.content
+                            duration = current_time - start_times["llama3"]
+                            response_queues["llama3"].put((content, duration))
+                except Exception as e:
+                    logger.error(f"Llama3 Error: {str(e)}")
+                    response_queues["llama3"].put(("ERROR", str(e)))
+                finally:
+                    response_queues["llama3"].put(None)  # Signal completion
+            
+            def gpt4o_worker():
+                try:
+                    completion = openai.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        stream=True
+                    )
+                    
+                    for chunk in completion:
+                        if chunk.choices[0].delta.content:
+                            current_time = time.time()
+                            content = chunk.choices[0].delta.content
+                            duration = current_time - start_times["gpt4o"]
+                            response_queues["gpt4o"].put((content, duration))
+                except Exception as e:
+                    logger.error(f"GPT4o Error: {str(e)}")
+                    response_queues["gpt4o"].put(("ERROR", str(e)))
+                finally:
+                    response_queues["gpt4o"].put(None)  # Signal completion
+            
+            def llm_jp_worker():
+                try:
+                    words = f"[LLM-JP-172B placeholder response for prompt: {prompt[:50]}...]".split()
+                    for word in words:
+                        current_time = time.time()
+                        duration = current_time - start_times["llm_jp"]
+                        response_queues["llm_jp"].put((word + " ", duration))
+                        time.sleep(0.1)
+                except Exception as e:
+                    logger.error(f"LLM-JP Error: {str(e)}")
+                    response_queues["llm_jp"].put(("ERROR", str(e)))
+                finally:
+                    response_queues["llm_jp"].put(None)  # Signal completion
+            
+            # Start all workers in separate threads
+            threads = [
+                Thread(target=llama3_worker),
+                Thread(target=gpt4o_worker),
+                Thread(target=llm_jp_worker)
+            ]
+            
+            for thread in threads:
+                thread.daemon = True
+                thread.start()
+            
+            # Track active models
+            active_models = {"llama3", "gpt4o", "llm_jp"}
+            
+            while active_models:
+                for model_id in list(active_models):
+                    try:
+                        result = response_queues[model_id].get_nowait()
+                        if result is None:
+                            active_models.remove(model_id)
+                            continue
+                            
+                        content, duration = result
+                        if content == "ERROR":
+                            error_data = json.dumps({"error": f"Error in {model_id}: {duration}"})
+                            yield f"data: {error_data}\n\n"
+                            active_models.remove(model_id)
+                            continue
+                            
+                        data = json.dumps({
+                            "model": model_id,
+                            "content": content,
+                            "timing": {
+                                "duration": duration * 1000  # Convert to milliseconds
+                            }
+                        })
+                        yield f"data: {data}\n\n"
+                    except Empty:
+                        continue
                 
-                data = json.dumps({
-                    "model": "llm_jp", 
-                    "content": word + " ",
-                    "timing": {
-                        "duration": duration * 1000  # Convert to milliseconds for frontend
-                    }
-                })
-                yield f"data: {data}\n\n"
-                time.sleep(0.1)
+                time.sleep(0.01)  # Small delay to prevent CPU spinning
             
-            # Process Llama3 stream
-            for llama_chunk in llama_completion:
-                if llama_chunk.choices[0].delta.content:
-                    current_time = time.time()
-                    content = llama_chunk.choices[0].delta.content
-                    responses["llama3"] += content
-                    duration = current_time - start_times["llama3"]
-                    
-                    data = json.dumps({
-                        "model": "llama3", 
-                        "content": content,
-                        "timing": {
-                            "duration": duration * 1000  # Convert to milliseconds for frontend
-                        }
-                    })
-                    yield f"data: {data}\n\n"
-            
-            # Process GPT4o stream
-            for gpt4o_chunk in gpt4o_completion:
-                if gpt4o_chunk.choices[0].delta.content:
-                    current_time = time.time()
-                    content = gpt4o_chunk.choices[0].delta.content
-                    responses["gpt4o"] += content
-                    duration = current_time - start_times["gpt4o"]
-                    
-                    data = json.dumps({
-                        "model": "gpt4o", 
-                        "content": content,
-                        "timing": {
-                            "duration": duration * 1000  # Convert to milliseconds for frontend
-                        }
-                    })
-                    yield f"data: {data}\n\n"
-                    
         except Exception as e:
             logger.error(f"Error in compare_models: {str(e)}")
             error_data = json.dumps({"error": str(e)})
