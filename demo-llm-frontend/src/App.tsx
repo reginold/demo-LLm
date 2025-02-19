@@ -33,19 +33,15 @@ function App() {
     
     setLoading(true);
     try {
-      const [llmJp172bResponse, gpt4oResponse, llama3405bResponse] = await Promise.all([
-        ModelService.callLlmJp172b(prompt),
-        ModelService.callGpt4o(prompt),
-        ModelService.callLlama3405b(prompt),
-      ]);
-
-      setResponses({
-        llmJp172bResponse,
-        gpt4oResponse,
-        llama3405bResponse,
-      });
+      const results = await ModelService.compareModels(prompt);
+      setResponses(results);
     } catch (error) {
       console.error('Error comparing models:', error);
+      setResponses({
+        llmJp172bResponse: 'Error occurred while comparing models',
+        gpt4oResponse: 'Error occurred while comparing models',
+        llama3405bResponse: 'Error occurred while comparing models',
+      });
     } finally {
       setLoading(false);
     }

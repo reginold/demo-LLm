@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios';
-import { ModelResponse } from '../types/index';
+import { ModelResponse, ComparisonState } from '../types/index';
 
 const API_URL = 'http://localhost:5000';
 
@@ -36,6 +36,31 @@ api.interceptors.request.use(request => {
 });
 
 export const ModelService = {
+  compareModels: async (prompt: string): Promise<ComparisonState> => {
+    try {
+      console.log('Comparing models with prompt:', prompt);
+      const response = await api.post<{
+        llama3_response: string;
+        gpt4o_response: string;
+        llm_jp_response: string;
+      }>('/api/compare', { prompt });
+      
+      return {
+        llama3405bResponse: response.data.llama3_response,
+        gpt4oResponse: response.data.gpt4o_response,
+        llmJp172bResponse: response.data.llm_jp_response,
+      };
+    } catch (error: any) {
+      console.error('Model Comparison Error:', error);
+      const errorMessage = `Error: ${error.message}. Server status: ${error.response?.status || 'unreachable'}`;
+      return {
+        llama3405bResponse: errorMessage,
+        gpt4oResponse: errorMessage,
+        llmJp172bResponse: errorMessage,
+      };
+    }
+  },
+
   callLlmJp172b: async (prompt: string): Promise<string> => {
     try {
       console.log('Calling LLM-JP-172B with prompt:', prompt);

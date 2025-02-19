@@ -60,7 +60,7 @@ def llama3_405b():
     data = request.get_json()
     prompt = data.get("prompt", "")
     
-    openai.api_key = os.environ.get("SAMBANOVA_API_KEY", "")
+    openai.api_key = os.environ.get("SAMBANOVA_API_KEY", "4da92e04-f2e4-4a25-8f40-b699512078b3")
     openai.api_base = "https://api.sambanova.ai/v1"  # Adjust if needed
 
     try:

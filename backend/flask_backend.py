@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify, make_response  # Add make_response
 from flask_cors import CORS
 import os
+from dotenv import load_dotenv
 import openai
 import logging
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -16,7 +20,11 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "OPTIONS"])
 
-
+# Initialize OpenAI client
+client_sn = openai.OpenAI(
+        api_key=os.environ["SAMBANOVA_API_KEY"],
+        base_url="https://api.sambanova.ai/v1",
+    )
 # ------------------------------------------------------------------------------
 # Root endpoint to confirm the backend is running
 # ------------------------------------------------------------------------------
@@ -48,10 +56,11 @@ def llm_jp_172b():
 def gpt4o():
     data = request.get_json()
     prompt = data.get("prompt", "")
-
+    openai.api_key = os.environ["OPENAI_API_KEY"]
+    
     try:
         completion = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
         )
         result_text = completion.choices[0].message.content
@@ -68,12 +77,15 @@ def llama3_405b():
     data = request.get_json()
     prompt = data.get("prompt", "")
     
-    client = openai.OpenAI(
-            base_url="https://api.sambanova.ai/v1",
-        )
+    # client = openai.OpenAI(
+    #         api_key=os.environ.get("SAMBANOVA_API_KEY", "4da92e04-f2e4-4a25-8f40-b699512078b3"),
+    #         base_url="https://api.sambanova.ai/v1",
+    #     )
+    # openai.api_key = os.environ.get("SAMBANOVA_API_KEY", "4da92e04-f2e4-4a25-8f40-b699512078b3")
+    # openai.api_base = "https://api.sambanova.ai/v1"  # Adjust if needed
 
     try:
-        completion = client.chat.completions.create(
+        completion = client_sn.chat.completions.create(
             model="Meta-Llama-3.1-8B-Instruct",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant"},
@@ -87,11 +99,53 @@ def llama3_405b():
     return jsonify({"result": result_text})
 
 # ------------------------------------------------------------------------------
+# Compare models endpoint
+# ------------------------------------------------------------------------------
+@app.route("/api/compare", methods=["POST"])
+def compare_models():
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    
+    try:
+        # Call Llama3 model
+        llama_completion = client_sn.chat.completions.create(
+            model="Meta-Llama-3.1-8B-Instruct",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant"},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        llama_response = llama_completion.choices[0].message.content
+        
+        # Call GPT4o model
+        openai.api_key = os.environ["OPENAI_API_KEY"]
+        gpt4o_completion = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        gpt4o_response = gpt4o_completion.choices[0].message.content
+        
+        # Placeholder for LLM-JP-172B
+        llm_jp_response = f"[LLM-JP-172B placeholder response for prompt: {prompt[:50]}...]"
+        
+        return jsonify({
+            "llama3_response": llama_response,
+            "gpt4o_response": gpt4o_response,
+            "llm_jp_response": llm_jp_response
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in compare_models: {str(e)}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+# ------------------------------------------------------------------------------
 # Flask entry point
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     try:
         print("Starting Flask server on http://localhost:5000")
-        app.run(host="localhost", port=5000, debug=True)
+        app.run(host="localhost", port=5000)
     except Exception as e:
         print(f"Error starting server: {e}")
